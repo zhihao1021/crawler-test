@@ -27,9 +27,11 @@ KEY_TUPLE = (
     "昨量",
     "振幅"
 )
-
+k = 0
+total = 0
 
 async def main():
+    global total
     if not isfile("data.db"):
         async with connect("data.db") as db:
             async with db.cursor() as cursor:
@@ -62,6 +64,7 @@ async def main():
     else:
         async with aopen("total_id.json") as _file:
             total_id = loads(await _file.read())
+    total = len(total_id)
     # async with ClientSession(headers=HEADERS) as client:
     #     tasks = list(map(lambda _id: create_task(client.get(f"https://tw.stock.yahoo.com/quote/{_id}")), total_id))
     #     print("Start")
@@ -70,10 +73,29 @@ async def main():
     print("取得所有資料...")
     queue = Queue()
     Thread(target=insert_db_thread, args=(queue,)).start()
-    tasks = list(map(lambda id_: create_task(get_data(id_=id_, queue=queue, session=session)), total_id))
-    await gather(*tasks)
+    lim = True
+    if lim:
+        in_queue = Queue()
+        for id_ in total_id: in_queue.put_nowait(id_)
+        tasks = [
+            create_task(queue_data(
+                in_queue,
+                queue,
+                session
+            ))
+            for _ in range(1000)
+        ]
+        await gather(*tasks)
+    else:
+        tasks = list(map(lambda id_: create_task(get_data(id_=id_, queue=queue, session=session)), total_id))
+        await gather(*tasks)
 
     await session.close()
+
+async def queue_data(in_queue: Queue, out_queue: Queue, session: Optional[ClientSession]=None):
+    while not in_queue.empty():
+        id_ = await in_queue.get()
+        await get_data(id_, out_queue, session)
 
 async def get_data(id_: str, queue: Queue, session: Optional[ClientSession]=None):
     res = await _requests(url=f"https://tw.stock.yahoo.com/quote/{id_}", session=session)
@@ -93,6 +115,7 @@ def insert_db_thread(queue: Queue):
     loop.close()
 
 async def insert_db(queue: Queue):
+    global k
     async with connect("data.db") as db:
         async with db.cursor() as cursor:
             while True:
@@ -100,7 +123,6 @@ async def insert_db(queue: Queue):
                     await asleep(1)
                     continue
                 id_, data = await queue.get()
-                print(id_, end="\r")
                 await cursor.execute(
                     f"SELECT * FROM data WHERE id=:id",
                     {"id": id_}
@@ -116,6 +138,8 @@ async def insert_db(queue: Queue):
                         {"value": value, "id": id_}
                     )
                 await db.commit()
+                k += 1
+                print(f"{k} / {total} - {id_}", end="\r")
 
 async def get_all_list(session: Optional[ClientSession]=None):
     type_names = map(
