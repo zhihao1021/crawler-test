@@ -62,6 +62,10 @@ async def main():
     else:
         async with aopen("total_id.json") as _file:
             total_id = loads(await _file.read())
+    # async with ClientSession(headers=HEADERS) as client:
+    #     tasks = list(map(lambda _id: create_task(client.get(f"https://tw.stock.yahoo.com/quote/{_id}")), total_id))
+    #     print("Start")
+    #     await gather(*tasks)
     
     print("取得所有資料...")
     queue = Queue()
